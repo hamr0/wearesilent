@@ -1,14 +1,6 @@
 "use strict";
 
-// Inject page-level script for prototype wrapping
-(function () {
-  var script = document.createElement("script");
-  script.src = chrome.runtime.getURL("injected.js");
-  script.onload = function () { script.remove(); };
-  (document.head || document.documentElement).appendChild(script);
-})();
-
-// Listen for leak events from injected script
+// Listen for leak events from injected script (runs in MAIN world via manifest)
 window.addEventListener("message", function (event) {
   if (event.source !== window) return;
   if (!event.data || event.data.type !== "wearesilent-leak") return;
