@@ -14,7 +14,7 @@ Part of the **weare____** privacy tool series.
 2. **Records recently-typed values** into a ring buffer (last 30 values, 4+ chars, 30s TTL)
 3. **Wraps outgoing request APIs** — `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, and `HTMLImageElement.src` setter
 4. **Correlates**: when a cross-origin request fires, checks if the URL or body contains any recently-typed value (raw string match + URL-encoded match)
-5. **Reports**: matched leaks surface as a red badge count and a popup showing each exfiltrated field, its destination, and the truncated value
+5. **Reports**: matched leaks surface as a red badge count and a popup showing which fields were sent, to which company, before you clicked submit
 
 All processing is local. No data leaves your browser. Same-origin requests are ignored — only cross-origin exfiltration is flagged.
 
@@ -82,3 +82,23 @@ User types into <input>     Site script reads .value     Script sends cross-orig
 - [Leaky Forms: A Study of Email and Password Exfiltration Before Form Submission (USENIX Security 2022)](https://www.usenix.org/conference/usenixsecurity22/presentation/senol)
 - [LeakInspector — KU Leuven proof-of-concept (MV2, discontinued)](https://github.com/leaky-forms/leak-inspector)
 - [No Boundaries: Exfiltration of Personal Data by Session Replay Scripts (Princeton 2017)](https://privacyinternational.org/examples/1918/no-boundaries-exfiltration-personal-data-session-replay-scripts)
+
+
+---
+
+## The weare____ Suite
+
+Privacy tools that show what's happening — no cloud, no accounts, nothing leaves your browser.
+
+| Extension | What it exposes |
+|-----------|----------------|
+| [wearecooked](https://github.com/hamr0/wearecooked) | Cookies, tracking pixels, and beacons |
+| [wearebaked](https://github.com/hamr0/wearebaked) | Network requests, third-party scripts, and data brokers |
+| [weareleaking](https://github.com/hamr0/weareleaking) | localStorage and sessionStorage tracking data |
+| [wearelinked](https://github.com/hamr0/wearelinked) | Redirect chains and tracking parameters in links |
+| [wearewatched](https://github.com/hamr0/wearewatched) | Browser fingerprinting and silent permission access |
+| [weareplayed](https://github.com/hamr0/weareplayed) | Dark patterns: fake urgency, confirm-shaming, pre-checked boxes |
+| [wearetosed](https://github.com/hamr0/wearetosed) | Toxic clauses in privacy policies and terms of service |
+| [wearesilent](https://github.com/hamr0/wearesilent) | Form input exfiltration before you click submit |
+
+All extensions run entirely on your device and work on Chrome and Firefox.
