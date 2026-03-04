@@ -1,9 +1,8 @@
 "use strict";
 
-// Accept keepalive ports from content scripts to prevent SW from sleeping
-chrome.runtime.onConnect.addListener(function (port) {
-  // Just hold the port open — this keeps the service worker alive
-});
+// Firefox MV3 uses event pages (not service workers) — no keepalive needed,
+// but accept ports from content.js for Chrome-compat content script code.
+chrome.runtime.onConnect.addListener(function (port) {});
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (message.type === "getLeaks") {

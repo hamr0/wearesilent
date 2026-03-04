@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "wearesilent",
-  "version": "0.2.0",
-  "description": "See what your form data gets sent to — before you hit submit.",
+  "version": "0.1.0",
+  "description": "Detects when websites capture your form input before you click submit — keystroke exfiltration made visible.",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "action": {

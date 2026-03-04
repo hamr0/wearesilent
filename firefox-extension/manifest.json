@@ -5,6 +5,12 @@
   "description": "See what your form data gets sent to — before you hit submit.",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wearesilent@wearesilent",
+      "strict_min_version": "128.0"
+    }
+  },
   "action": {
     "default_title": "wearesilent",
     "default_popup": "popup.html",
@@ -15,7 +21,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
   },
   "content_scripts": [
     {

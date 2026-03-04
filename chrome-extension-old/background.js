@@ -1,28 +1,30 @@
 "use strict";
 
-// Accept keepalive ports from content scripts to prevent SW from sleeping
-chrome.runtime.onConnect.addListener(function (port) {
-  // Just hold the port open — this keeps the service worker alive
-});
+// Per-tab leak data: { tabId: { domain, leaks: [{field, value, destination, url, ts}] } }
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (message.type === "getLeaks") {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      if (!tabs.length) { sendResponse(null); return; }
-      chrome.storage.session.get("tab:" + tabs[0].id, function (result) {
-        sendResponse(result["tab:" + tabs[0].id] || null);
+      if (tabs.length === 0) { sendResponse(null); return; }
+      var tid = tabs[0].id;
+      chrome.storage.session.get("tab:" + tid, function (result) {
+        sendResponse(result["tab:" + tid] || null);
       });
     });
     return true;
   }
 
   if (message.type === "leak" && sender.tab) {
-    // Same-site filter: skip if destination is on the page's own domain
+    // Skip unnamed fields (fallback names from getFieldName mean no real field identity)
+    var fn = message.field.toLowerCase();
+    if (fn === "textarea" || fn === "input" || fn === "text") return;
+
+    // Skip same-site destinations
     var host = message.domain.replace(/^www\./, "");
-    var parts = host.split(".");
-    var base = parts.length > 2 ? parts.slice(-2).join(".") : host;
+    var hp = host.split(".");
+    var base = hp.length > 2 ? hp.slice(-2).join(".") : host;
     var dest = message.destination;
-    if (dest === base || dest.endsWith("." + base)) return;
+    if (dest === base || dest.slice(-(base.length + 1)) === "." + base) return;
 
     var tabId = sender.tab.id;
     var key = "tab:" + tabId;
@@ -30,13 +32,15 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     chrome.storage.session.get(key, function (result) {
       var data = result[key] || { domain: message.domain, leaks: [] };
 
-      // Dedup by label + destination
+      // Dedup
       for (var i = 0; i < data.leaks.length; i++) {
-        if (data.leaks[i].label === message.label && data.leaks[i].destination === message.destination) return;
+        if (data.leaks[i].field === message.field && data.leaks[i].destination === message.destination) {
+          return; // Already recorded
+        }
       }
 
       data.leaks.push({
-        label: message.label,
+        field: message.field,
         value: message.value,
         destination: message.destination,
         url: message.url,
@@ -48,7 +52,9 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       obj[key] = data;
       chrome.storage.session.set(obj);
 
-      chrome.action.setBadgeText({ text: String(data.leaks.length), tabId: tabId });
+      // Update badge
+      var count = data.leaks.length;
+      chrome.action.setBadgeText({ text: String(count), tabId: tabId });
       chrome.action.setBadgeBackgroundColor({ color: "#e74c3c", tabId: tabId });
     });
   }
