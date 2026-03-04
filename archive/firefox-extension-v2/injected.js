@@ -193,4 +193,21 @@
       enumerable: true
     });
   }
+
+  // ---- Fallback: PerformanceObserver ----
+  // Catches cross-origin requests that bypassed our wrappers
+  // (e.g. site scripts cached fetch/XHR references before our script ran).
+  // Only sees URLs (not POST bodies), but most trackers encode values in URLs.
+  try {
+    var po = new PerformanceObserver(function (list) {
+      var entries = list.getEntries();
+      for (var i = 0; i < entries.length; i++) {
+        var name = entries[i].name;
+        if (name && isCrossOrigin(name)) {
+          checkForLeaks(name, "");
+        }
+      }
+    });
+    po.observe({ type: "resource", buffered: true });
+  } catch (e) {}
 })();

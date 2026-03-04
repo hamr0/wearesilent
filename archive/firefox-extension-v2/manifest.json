@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
   "name": "wearesilent",
-  "version": "0.3.0",
+  "version": "0.2.0",
   "description": "See what your form data gets sent to — before you hit submit.",
-  "permissions": ["storage", "webRequest"],
+  "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wearesilent@wearesilent",
+      "strict_min_version": "109.0"
+    }
+  },
   "action": {
     "default_title": "wearesilent",
     "default_popup": "popup.html",
@@ -15,14 +21,20 @@
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle",
+      "run_at": "document_start",
       "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "icons": {

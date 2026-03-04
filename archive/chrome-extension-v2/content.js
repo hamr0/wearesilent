@@ -10,8 +10,10 @@ function ensurePort() {
     port = chrome.runtime.connect({ name: "keepalive" });
     port.onDisconnect.addListener(function () {
       port = null;
-      // Reconnect after a short delay if the SW restarted
-      setTimeout(ensurePort, 1000);
+      // Only reconnect if page is still visible (not in bfcache)
+      if (document.visibilityState === "visible") {
+        setTimeout(ensurePort, 1000);
+      }
     });
   } catch (e) {
     port = null;

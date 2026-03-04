@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <link rel="stylesheet" href="popup.css">
+  <title>wearesilent</title>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>wearesilent</h1>
+    </header>
+    <p class="tagline">sent before you submit</p>
+    <div id="leaks"></div>
+    <div id="clean" class="empty hidden">
+      <div class="empty-icon">--</div>
+      <div>No leaks detected on this page.</div>
+    </div>
+    <div id="loading" class="empty">
+      <div class="empty-icon">...</div>
+      <div>Watching for leaks...</div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

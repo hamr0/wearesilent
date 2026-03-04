@@ -48,10 +48,7 @@ var KNOWN_COMPANIES = {
   "srmdata.com": "Salesforce",
   "addressy.com": "Loqate",
   "loqate.com": "Loqate",
-  "sierra.chat": "Sierra AI",
-  "nr-data.net": "New Relic",
-  "newrelic.com": "New Relic",
-  "datadome.co": "DataDome"
+  "sierra.chat": "Sierra AI"
 };
 
 function resolveCompany(hostname) {
@@ -71,7 +68,7 @@ function cleanLabel(raw) {
 }
 
 document.addEventListener("DOMContentLoaded", function () {
-  chrome.runtime.sendMessage({ type: "getLeaks" }, function (data) {
+  browser.runtime.sendMessage({ type: "getLeaks" }).then(function (data) {
     render(data);
   });
 });

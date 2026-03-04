@@ -2,13 +2,13 @@
 
 // Firefox MV3 uses event pages (not service workers) — no keepalive needed,
 // but accept ports from content.js for Chrome-compat content script code.
-chrome.runtime.onConnect.addListener(function (port) {});
+browser.runtime.onConnect.addListener(function (port) {});
 
-chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (message.type === "getLeaks") {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+    browser.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       if (!tabs.length) { sendResponse(null); return; }
-      chrome.storage.session.get("tab:" + tabs[0].id, function (result) {
+      browser.storage.session.get("tab:" + tabs[0].id, function (result) {
         sendResponse(result["tab:" + tabs[0].id] || null);
       });
     });
@@ -26,7 +26,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     var tabId = sender.tab.id;
     var key = "tab:" + tabId;
 
-    chrome.storage.session.get(key, function (result) {
+    browser.storage.session.get(key, function (result) {
       var data = result[key] || { domain: message.domain, leaks: [] };
 
       // Dedup by label + destination
@@ -45,21 +45,21 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
       var obj = {};
       obj[key] = data;
-      chrome.storage.session.set(obj);
+      browser.storage.session.set(obj);
 
-      chrome.action.setBadgeText({ text: String(data.leaks.length), tabId: tabId });
-      chrome.action.setBadgeBackgroundColor({ color: "#e74c3c", tabId: tabId });
+      browser.action.setBadgeText({ text: "!", tabId: tabId });
+      browser.action.setBadgeBackgroundColor({ color: "#e74c3c", tabId: tabId });
     });
   }
 });
 
-chrome.tabs.onRemoved.addListener(function (tabId) {
-  chrome.storage.session.remove("tab:" + tabId);
+browser.tabs.onRemoved.addListener(function (tabId) {
+  browser.storage.session.remove("tab:" + tabId);
 });
 
-chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
+browser.tabs.onUpdated.addListener(function (tabId, changeInfo) {
   if (changeInfo.status === "loading" && changeInfo.url) {
-    chrome.storage.session.remove("tab:" + tabId);
-    chrome.action.setBadgeText({ text: "", tabId: tabId });
+    browser.storage.session.remove("tab:" + tabId);
+    browser.action.setBadgeText({ text: "", tabId: tabId });
   }
 });
