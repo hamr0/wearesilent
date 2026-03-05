@@ -107,6 +107,10 @@ function render(data) {
 
   if (!hasLeaks && !hasTrackers) {
     cleanEl.classList.remove("hidden");
+    // Clear stale badge (background may have set "!" for unknown third-party domains)
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      if (tabs[0]) chrome.action.setBadgeText({ text: "", tabId: tabs[0].id });
+    });
     return;
   }
 

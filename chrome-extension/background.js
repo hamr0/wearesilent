@@ -12,6 +12,73 @@ var tabTrackers = {};
 // Per-tab form field labels from content script: { tabId: [label, ...] }
 var tabFields = {};
 
+// Map domains to parent entity for same-party filtering
+// Domains owned by the same company are not third-party leaks
+var DOMAIN_ENTITY = {
+  "google.com": "google", "google-analytics.com": "google", "googletagmanager.com": "google",
+  "doubleclick.net": "google", "googleadservices.com": "google", "googlesyndication.com": "google",
+  "gstatic.com": "google", "googleapis.com": "google", "youtube.com": "google",
+  "googleusercontent.com": "google", "googlevideo.com": "google", "1e100.net": "google",
+  "gvt1.com": "google", "gvt2.com": "google", "ggpht.com": "google", "recaptcha.net": "google",
+  "withgoogle.com": "google", "chromium.org": "google", "android.com": "google",
+  "google.co.uk": "google", "google.ca": "google", "google.de": "google",
+  "google.fr": "google", "google.co.jp": "google", "google.com.au": "google",
+  "google.co.in": "google", "google.com.br": "google", "google.it": "google",
+  "google.es": "google", "google.nl": "google", "google.pl": "google",
+  "facebook.com": "meta", "facebook.net": "meta", "instagram.com": "meta", "fbcdn.net": "meta",
+  "microsoft.com": "microsoft", "bing.com": "microsoft", "clarity.ms": "microsoft",
+  "linkedin.com": "microsoft", "live.com": "microsoft", "msn.com": "microsoft",
+  "tiktok.com": "bytedance", "bytedance.com": "bytedance",
+  "twitter.com": "x", "x.com": "x", "twimg.com": "x",
+  "shopify.com": "shopify", "shopifysvc.com": "shopify", "myshopify.com": "shopify",
+  "yahoo.com": "yahoo", "aol.com": "yahoo",
+  "amazon.com": "amazon", "amazonaws.com": "amazon", "cloudfront.net": "amazon"
+};
+
+function getEntity(hostname) {
+  var h = hostname.replace(/^www\./, "");
+  if (DOMAIN_ENTITY[h]) return DOMAIN_ENTITY[h];
+  var parts = h.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    if (DOMAIN_ENTITY[parts.join(".")]) return DOMAIN_ENTITY[parts.join(".")];
+  }
+  // Google country TLDs (google.co.xx, google.xx, google.com.xx)
+  var base = parts.length >= 2 ? parts.join(".") : h;
+  if (/^google\.\w{2,3}$/.test(base) || /^google\.co\.\w{2,3}$/.test(base) || /^google\.com\.\w{2,3}$/.test(base)) return "google";
+  // Fallback: treat base domain as its own entity
+  return base;
+}
+
+function isSameParty(hostA, hostB) {
+  return getEntity(hostA) === getEntity(hostB);
+}
+
+// Known tracker domains — only these trigger the detect "!" badge
+// Must stay in sync with KNOWN_COMPANIES in popup.js
+var KNOWN_TRACKER_DOMAINS = [
+  "google-analytics.com", "googleads.g.doubleclick.net", "googletagmanager.com",
+  "doubleclick.net", "googleadservices.com", "googlesyndication.com",
+  "facebook.com", "facebook.net", "connect.facebook.net",
+  "clarity.ms", "bing.com", "hotjar.com", "fullstory.com", "mouseflow.com",
+  "logrocket.com", "crazyegg.com", "klaviyo.com", "hubspot.com", "mailchimp.com",
+  "braze.com", "adsrvr.org", "criteo.com", "criteo.net", "taboola.com", "outbrain.com",
+  "mixpanel.com", "amplitude.com", "segment.io", "segment.com", "heap.io",
+  "shopifysvc.com", "shopify.com", "tiktok.com", "bytedance.com",
+  "snap.com", "snapchat.com", "pinterest.com", "linkedin.com",
+  "twitter.com", "x.com", "rudderlabs.com", "mparticle.com",
+  "srmdata-eur.com", "srmdata.com", "addressy.com", "loqate.com",
+  "sierra.chat", "nr-data.net", "newrelic.com", "datadome.co", "forter.com"
+];
+
+function isKnownTracker(hostname) {
+  var h = hostname.replace(/^www\./, "").toLowerCase();
+  for (var i = 0; i < KNOWN_TRACKER_DOMAINS.length; i++) {
+    if (h === KNOWN_TRACKER_DOMAINS[i] || h.endsWith("." + KNOWN_TRACKER_DOMAINS[i])) return true;
+  }
+  return false;
+}
+
 var VALUE_TTL = 120000; // 2 minutes
 var REQUEST_BUFFER_TTL = 30000; // 30s — keep recent requests for retroactive matching
 var MAX_VALUES_PER_TAB = 50;
@@ -97,13 +164,20 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (message.type === "reportFields" && sender.tab) {
     var tabId = sender.tab.id;
     tabFields[tabId] = message.fields;
-    // Show detect badge if trackers present but no leaks yet
-    if (message.fields.length > 0 && tabTrackers[tabId]) {
-      chrome.storage.session.get("tab:" + tabId, function (result) {
-        if (!result["tab:" + tabId]) {
-          updateDetectBadge(tabId);
-        }
+    // Show detect badge if third-party trackers present but no leaks yet
+    if (message.fields.length > 0 && tabTrackers[tabId] && sender.tab.url) {
+      var pageHost;
+      try { pageHost = new URL(sender.tab.url).hostname; } catch (e) { return; }
+      var hasKnownThirdParty = Object.keys(tabTrackers[tabId]).some(function (h) {
+        return isKnownTracker(h) && !isSameParty(h, pageHost);
       });
+      if (hasKnownThirdParty) {
+        chrome.storage.session.get("tab:" + tabId, function (result) {
+          if (!result["tab:" + tabId]) {
+            updateDetectBadge(tabId);
+          }
+        });
+      }
     }
     return;
   }
@@ -115,18 +189,15 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       var trackerHosts = tabTrackers[tid] ? Object.keys(tabTrackers[tid]) : [];
       var fields = tabFields[tid] || [];
 
-      // Filter trackers: remove same-site
+      // Filter trackers: remove same-party (same entity)
       var pageHost = "";
       if (tabs[0].url) {
         try { pageHost = new URL(tabs[0].url).hostname.replace(/^www\./, ""); }
         catch (e) {}
       }
-      var parts = pageHost.split(".");
-      var base = parts.length > 2 ? parts.slice(-2).join(".") : pageHost;
 
       var thirdParty = trackerHosts.filter(function (h) {
-        if (h === base || h.endsWith("." + base)) return false;
-        return true;
+        return !isSameParty(h, pageHost);
       });
 
       chrome.storage.session.get("tab:" + tid, function (result) {
@@ -156,12 +227,19 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (!tabTrackers[details.tabId]) tabTrackers[details.tabId] = {};
     if (!tabTrackers[details.tabId][destHostname]) {
       tabTrackers[details.tabId][destHostname] = true;
-      // Show detect badge if fields present but no leaks yet
-      if (tabFields[details.tabId] && tabFields[details.tabId].length > 0) {
-        chrome.storage.session.get("tab:" + details.tabId, function (result) {
-          if (!result["tab:" + details.tabId]) {
-            updateDetectBadge(details.tabId);
-          }
+      // Show detect badge only for known trackers that are third-party
+      if (isKnownTracker(destHostname) && tabFields[details.tabId] && tabFields[details.tabId].length > 0) {
+        var tid = details.tabId;
+        chrome.tabs.get(tid, function (tab) {
+          if (chrome.runtime.lastError || !tab || !tab.url) return;
+          var pageHost;
+          try { pageHost = new URL(tab.url).hostname; } catch (e) { return; }
+          if (isSameParty(destHostname, pageHost)) return;
+          chrome.storage.session.get("tab:" + tid, function (result) {
+            if (!result["tab:" + tid]) {
+              updateDetectBadge(tid);
+            }
+          });
         });
       }
     }
@@ -221,11 +299,8 @@ function storeLeak(tabId, leak) {
       try { pageHost = new URL(tab.url).hostname.replace(/^www\./, ""); }
       catch (e) { return; }
 
-      var parts = pageHost.split(".");
-      var base = parts.length > 2 ? parts.slice(-2).join(".") : pageHost;
-
-      // Same-site filter
-      if (leak.destination === base || leak.destination.endsWith("." + base)) return;
+      // Same-party filter (same entity = not a leak)
+      if (isSameParty(leak.destination, pageHost)) return;
 
       var data = result[key] || { domain: pageHost, leaks: [] };
 

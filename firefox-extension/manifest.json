@@ -40,7 +40,17 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "wearesilent@wearesilent",
-      "strict_min_version": "115.0"
+      "strict_min_version": "115.0",
+      "data_collection_permissions": {
+        "personally_identifying_info": false,
+        "health_info": false,
+        "financial_and_payment_info": false,
+        "authentication_info": false,
+        "personal_communications": false,
+        "location": false,
+        "browsing_activity": false,
+        "technical_and_interaction": false
+      }
     }
   }
 }

@@ -6,6 +6,71 @@ var tabValues = {};
 // Per-tab buffered requests (in-memory, hot path only): { tabId: [ { url, haystack, destHostname, ts } ] }
 var tabRequests = {};
 
+// Map domains to parent entity for same-party filtering
+var DOMAIN_ENTITY = {
+  "google.com": "google", "google-analytics.com": "google", "googletagmanager.com": "google",
+  "doubleclick.net": "google", "googleadservices.com": "google", "googlesyndication.com": "google",
+  "gstatic.com": "google", "googleapis.com": "google", "youtube.com": "google",
+  "googleusercontent.com": "google", "googlevideo.com": "google", "1e100.net": "google",
+  "gvt1.com": "google", "gvt2.com": "google", "ggpht.com": "google", "recaptcha.net": "google",
+  "withgoogle.com": "google", "chromium.org": "google", "android.com": "google",
+  "google.co.uk": "google", "google.ca": "google", "google.de": "google",
+  "google.fr": "google", "google.co.jp": "google", "google.com.au": "google",
+  "google.co.in": "google", "google.com.br": "google", "google.it": "google",
+  "google.es": "google", "google.nl": "google", "google.pl": "google",
+  "facebook.com": "meta", "facebook.net": "meta", "instagram.com": "meta", "fbcdn.net": "meta",
+  "microsoft.com": "microsoft", "bing.com": "microsoft", "clarity.ms": "microsoft",
+  "linkedin.com": "microsoft", "live.com": "microsoft", "msn.com": "microsoft",
+  "tiktok.com": "bytedance", "bytedance.com": "bytedance",
+  "twitter.com": "x", "x.com": "x", "twimg.com": "x",
+  "shopify.com": "shopify", "shopifysvc.com": "shopify", "myshopify.com": "shopify",
+  "yahoo.com": "yahoo", "aol.com": "yahoo",
+  "amazon.com": "amazon", "amazonaws.com": "amazon", "cloudfront.net": "amazon"
+};
+
+function getEntity(hostname) {
+  var h = hostname.replace(/^www\./, "");
+  if (DOMAIN_ENTITY[h]) return DOMAIN_ENTITY[h];
+  var parts = h.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    if (DOMAIN_ENTITY[parts.join(".")]) return DOMAIN_ENTITY[parts.join(".")];
+  }
+  // Google country TLDs (google.co.xx, google.xx, google.com.xx)
+  var base = parts.length >= 2 ? parts.join(".") : h;
+  if (/^google\.\w{2,3}$/.test(base) || /^google\.co\.\w{2,3}$/.test(base) || /^google\.com\.\w{2,3}$/.test(base)) return "google";
+  // Fallback: treat base domain as its own entity
+  return base;
+}
+
+function isSameParty(hostA, hostB) {
+  return getEntity(hostA) === getEntity(hostB);
+}
+
+// Known tracker domains — only these trigger the detect "!" badge
+var KNOWN_TRACKER_DOMAINS = [
+  "google-analytics.com", "googleads.g.doubleclick.net", "googletagmanager.com",
+  "doubleclick.net", "googleadservices.com", "googlesyndication.com",
+  "facebook.com", "facebook.net", "connect.facebook.net",
+  "clarity.ms", "bing.com", "hotjar.com", "fullstory.com", "mouseflow.com",
+  "logrocket.com", "crazyegg.com", "klaviyo.com", "hubspot.com", "mailchimp.com",
+  "braze.com", "adsrvr.org", "criteo.com", "criteo.net", "taboola.com", "outbrain.com",
+  "mixpanel.com", "amplitude.com", "segment.io", "segment.com", "heap.io",
+  "shopifysvc.com", "shopify.com", "tiktok.com", "bytedance.com",
+  "snap.com", "snapchat.com", "pinterest.com", "linkedin.com",
+  "twitter.com", "x.com", "rudderlabs.com", "mparticle.com",
+  "srmdata-eur.com", "srmdata.com", "addressy.com", "loqate.com",
+  "sierra.chat", "nr-data.net", "newrelic.com", "datadome.co", "forter.com"
+];
+
+function isKnownTracker(hostname) {
+  var h = hostname.replace(/^www\./, "").toLowerCase();
+  for (var i = 0; i < KNOWN_TRACKER_DOMAINS.length; i++) {
+    if (h === KNOWN_TRACKER_DOMAINS[i] || h.endsWith("." + KNOWN_TRACKER_DOMAINS[i])) return true;
+  }
+  return false;
+}
+
 var VALUE_TTL = 120000; // 2 minutes
 var REQUEST_BUFFER_TTL = 30000; // 30s — keep recent requests for retroactive matching
 var MAX_VALUES_PER_TAB = 50;
@@ -141,13 +206,18 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   // Store form field labels reported by content script
   if (message.type === "reportFields" && sender.tab) {
     var tabId = sender.tab.id;
+    var pageHost;
+    try { pageHost = sender.tab.url ? new URL(sender.tab.url).hostname : ""; } catch (e) { pageHost = ""; }
     getTabData(tabId, function (data) {
       if (!data) data = { domain: "", leaks: [], trackers: [], fields: [] };
       data.fields = message.fields;
       setTabData(tabId, data);
-      // Show detect badge if trackers present but no leaks yet
+      // Show detect badge if third-party trackers present but no leaks yet
       if (message.fields.length > 0 && data.trackers && data.trackers.length > 0 && (!data.leaks || data.leaks.length === 0)) {
-        updateDetectBadge(tabId);
+        var hasKnownThirdParty = data.trackers.some(function (h) {
+          return isKnownTracker(h) && !isSameParty(h, pageHost);
+        });
+        if (hasKnownThirdParty) updateDetectBadge(tabId);
       }
     });
     return;
@@ -168,12 +238,9 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         var tabData = result["tab:" + tid];
         if (!tabData) return { leaks: null, trackers: [], fields: [], domain: pageHost };
 
-        // Filter trackers: remove same-site
-        var parts = pageHost.split(".");
-        var base = parts.length > 2 ? parts.slice(-2).join(".") : pageHost;
+        // Filter trackers: remove same-party (same entity)
         var thirdParty = (tabData.trackers || []).filter(function (h) {
-          if (h === base || h.endsWith("." + base)) return false;
-          return true;
+          return !isSameParty(h, pageHost);
         });
 
         var leakData = (tabData.leaks && tabData.leaks.length > 0)
@@ -202,15 +269,23 @@ browser.webRequest.onBeforeRequest.addListener(
     catch (e) { return; }
 
     // Track third-party domains for Approach A (tracker awareness) — persist to storage.session
-    getTabData(details.tabId, function (data) {
+    var tid = details.tabId;
+    getTabData(tid, function (data) {
       if (!data) data = { domain: "", leaks: [], trackers: [], fields: [] };
       if (!data.trackers) data.trackers = [];
       if (data.trackers.indexOf(destHostname) === -1) {
         data.trackers.push(destHostname);
-        setTabData(details.tabId, data);
-        // Show detect badge if fields present but no leaks yet
-        if (data.fields && data.fields.length > 0 && (!data.leaks || data.leaks.length === 0)) {
-          updateDetectBadge(details.tabId);
+        setTabData(tid, data);
+        // Show detect badge only for known trackers that are third-party
+        if (isKnownTracker(destHostname) && data.fields && data.fields.length > 0 && (!data.leaks || data.leaks.length === 0)) {
+          browser.tabs.get(tid).then(function (tab) {
+            if (!tab || !tab.url) return;
+            var pageHost;
+            try { pageHost = new URL(tab.url).hostname; } catch (e) { return; }
+            if (!isSameParty(destHostname, pageHost)) {
+              updateDetectBadge(tid);
+            }
+          }).catch(function () {});
         }
       }
     });
@@ -267,11 +342,8 @@ function storeLeak(tabId, leak) {
     try { pageHost = new URL(tab.url).hostname.replace(/^www\./, ""); }
     catch (e) { return; }
 
-    var parts = pageHost.split(".");
-    var base = parts.length > 2 ? parts.slice(-2).join(".") : pageHost;
-
-    // Same-site filter
-    if (leak.destination === base || leak.destination.endsWith("." + base)) return;
+    // Same-party filter (same entity = not a leak)
+    if (isSameParty(leak.destination, pageHost)) return;
 
     getTabData(tabId, function (data) {
       if (!data) data = { domain: pageHost, leaks: [], trackers: [], fields: [] };
