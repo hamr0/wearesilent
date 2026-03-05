@@ -73,8 +73,10 @@ function cleanLabel(raw) {
 }
 
 document.addEventListener("DOMContentLoaded", function () {
-  chrome.runtime.sendMessage({ type: "getPageData" }, function (data) {
+  browser.runtime.sendMessage({ type: "getPageData" }).then(function (data) {
     render(data);
+  }).catch(function () {
+    render(null);
   });
 });
 
@@ -151,7 +153,7 @@ function render(data) {
 
     leaksEl.appendChild(summary);
 
-    // Heading
+    // Heading with count
     var heading = el("div", "leak-heading");
     var headingText = el("span", "");
     headingText.textContent = "Sent without your permission";

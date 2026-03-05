@@ -6,6 +6,12 @@ var tabValues = {};
 // Per-tab buffered requests: { tabId: [ { url, haystack, destHostname, ts } ] }
 var tabRequests = {};
 
+// Per-tab detected third-party tracker domains: { tabId: { hostname: true } }
+var tabTrackers = {};
+
+// Per-tab form field labels from content script: { tabId: [label, ...] }
+var tabFields = {};
+
 var VALUE_TTL = 120000; // 2 minutes
 var REQUEST_BUFFER_TTL = 30000; // 30s — keep recent requests for retroactive matching
 var MAX_VALUES_PER_TAB = 50;
@@ -87,11 +93,49 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     return;
   }
 
-  if (message.type === "getLeaks") {
+  // Store form field labels reported by content script
+  if (message.type === "reportFields" && sender.tab) {
+    var tabId = sender.tab.id;
+    tabFields[tabId] = message.fields;
+    // Show detect badge if trackers present but no leaks yet
+    if (message.fields.length > 0 && tabTrackers[tabId]) {
+      chrome.storage.session.get("tab:" + tabId, function (result) {
+        if (!result["tab:" + tabId]) {
+          updateDetectBadge(tabId);
+        }
+      });
+    }
+    return;
+  }
+
+  if (message.type === "getPageData") {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       if (!tabs.length) { sendResponse(null); return; }
-      chrome.storage.session.get("tab:" + tabs[0].id, function (result) {
-        sendResponse(result["tab:" + tabs[0].id] || null);
+      var tid = tabs[0].id;
+      var trackerHosts = tabTrackers[tid] ? Object.keys(tabTrackers[tid]) : [];
+      var fields = tabFields[tid] || [];
+
+      // Filter trackers: remove same-site
+      var pageHost = "";
+      if (tabs[0].url) {
+        try { pageHost = new URL(tabs[0].url).hostname.replace(/^www\./, ""); }
+        catch (e) {}
+      }
+      var parts = pageHost.split(".");
+      var base = parts.length > 2 ? parts.slice(-2).join(".") : pageHost;
+
+      var thirdParty = trackerHosts.filter(function (h) {
+        if (h === base || h.endsWith("." + base)) return false;
+        return true;
+      });
+
+      chrome.storage.session.get("tab:" + tid, function (result) {
+        sendResponse({
+          leaks: result["tab:" + tid] || null,
+          trackers: thirdParty,
+          fields: fields,
+          domain: pageHost
+        });
       });
     });
     return true;
@@ -107,6 +151,20 @@ chrome.webRequest.onBeforeRequest.addListener(
     var destHostname;
     try { destHostname = new URL(details.url).hostname; }
     catch (e) { return; }
+
+    // Track third-party domains for Approach A (tracker awareness)
+    if (!tabTrackers[details.tabId]) tabTrackers[details.tabId] = {};
+    if (!tabTrackers[details.tabId][destHostname]) {
+      tabTrackers[details.tabId][destHostname] = true;
+      // Show detect badge if fields present but no leaks yet
+      if (tabFields[details.tabId] && tabFields[details.tabId].length > 0) {
+        chrome.storage.session.get("tab:" + details.tabId, function (result) {
+          if (!result["tab:" + details.tabId]) {
+            updateDetectBadge(details.tabId);
+          }
+        });
+      }
+    }
 
     var haystack = buildHaystack(details);
 
@@ -142,6 +200,13 @@ chrome.webRequest.onBeforeRequest.addListener(
   { urls: ["<all_urls>"] },
   ["requestBody"]
 );
+
+// --- Detect badge (Approach A: trackers + fields, no confirmed leaks) ---
+
+function updateDetectBadge(tabId) {
+  chrome.action.setBadgeText({ text: "!", tabId: tabId });
+  chrome.action.setBadgeBackgroundColor({ color: "#f0a030", tabId: tabId });
+}
 
 // --- Store leak + update badge ---
 
@@ -190,6 +255,8 @@ function storeLeak(tabId, leak) {
 chrome.tabs.onRemoved.addListener(function (tabId) {
   delete tabValues[tabId];
   delete tabRequests[tabId];
+  delete tabTrackers[tabId];
+  delete tabFields[tabId];
   chrome.storage.session.remove("tab:" + tabId);
 });
 
@@ -197,6 +264,8 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
   if (changeInfo.status === "loading" && changeInfo.url) {
     delete tabValues[tabId];
     delete tabRequests[tabId];
+    delete tabTrackers[tabId];
+    delete tabFields[tabId];
     chrome.storage.session.remove("tab:" + tabId);
     chrome.action.setBadgeText({ text: "", tabId: tabId });
   }

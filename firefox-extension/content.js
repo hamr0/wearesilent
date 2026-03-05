@@ -1,10 +1,32 @@
 "use strict";
 
 // Track form field values and send them to background for correlation.
-// No MAIN world script needed — webRequest handles network monitoring.
+// Injects a page-level script to capture request bodies that Firefox
+// webRequest may not expose (sendBeacon, some fetch calls).
 
 var MIN_LENGTH = 3;
 var tracked = {}; // value → { label, ts }
+
+// --- Inject page-level body capture script ---
+(function () {
+  try {
+    var s = document.createElement("script");
+    s.src = browser.runtime.getURL("injected.js");
+    s.onload = function () { s.remove(); };
+    s.onerror = function () { s.remove(); }; // CSP may block — fail silently
+    (document.head || document.documentElement).appendChild(s);
+  } catch (e) {}
+})();
+
+// Listen for captured request bodies from injected.js
+window.addEventListener("__wearesilent_request__", function (e) {
+  if (!e.detail || !e.detail.url || !e.detail.body) return;
+  browser.runtime.sendMessage({
+    type: "capturedRequest",
+    url: e.detail.url,
+    body: e.detail.body
+  }).catch(function () {});
+}, true);
 
 function getAriaLabel(el) {
   // 1. aria-labelledby
@@ -65,8 +87,7 @@ function trackField(el) {
   tracked[trimmed] = { label: label, ts: Date.now() };
 
   // Send to background for correlation
-  if (!chrome.runtime.id) return; // extension was reloaded/invalidated
-  chrome.runtime.sendMessage({
+  browser.runtime.sendMessage({
     type: "trackValue",
     value: trimmed,
     label: label
@@ -90,8 +111,8 @@ function scanFields() {
     seen[label] = true;
     fields.push(label);
   }
-  if (fields.length > 0 && chrome.runtime.id) {
-    chrome.runtime.sendMessage({ type: "reportFields", fields: fields }).catch(function () {});
+  if (fields.length > 0) {
+    browser.runtime.sendMessage({ type: "reportFields", fields: fields }).catch(function () {});
   }
 }
 

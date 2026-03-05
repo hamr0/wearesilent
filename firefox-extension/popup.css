@@ -111,6 +111,19 @@ h1 {
   margin-top: 3px;
 }
 
+.empty {
+  text-align: center;
+  padding: 20px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.empty-icon {
+  font-size: 28px;
+  color: #4caf50;
+  margin-bottom: 8px;
+}
+
 .detect-heading {
   display: flex;
   justify-content: space-between;
@@ -159,19 +172,6 @@ h1 {
   color: #f0a030;
   font-style: italic;
   margin-top: 4px;
-}
-
-.empty {
-  text-align: center;
-  padding: 20px 0;
-  color: #666;
-  font-size: 14px;
-}
-
-.empty-icon {
-  font-size: 28px;
-  color: #4caf50;
-  margin-bottom: 8px;
 }
 
 .hidden {
