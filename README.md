@@ -6,6 +6,9 @@ You're still typing your email into a login form, but a script already read the 
 
 No cloud. No AI. Everything runs locally in your browser.
 
+![wearesilent popup](store-assets/silent1.png)
+![wearesilent popup detail](store-assets/silent2.png)
+
 ## What it looks like
 
 The popup has two independent sections:
