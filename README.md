@@ -94,21 +94,23 @@ Unknown hostnames are silently filtered from the popup — users only see recogn
 | Shein.com | Email Address | Salesforce |
 | Test page (localhost) | Email, Password, Search, Name, Phone, Address | Google Analytics, Meta, Hotjar, Klaviyo, TikTok, Shopify |
 
-## Install
+## Try It Now
+
+Store approval pending — install locally in under a minute:
 
 ### Chrome
-1. Clone or download this repo
-2. Open `chrome://extensions/`
-3. Enable **Developer mode**
-4. Click **Load unpacked** → select the `chrome-extension/` folder
+1. Download this repo (Code → Download ZIP) and unzip
+2. Go to `chrome://extensions` and turn on **Developer mode** (top right)
+3. Click **Load unpacked** → select the `chrome-extension` folder
+4. That's it — browse any site and click the extension icon
 
 ### Firefox
-1. Clone or download this repo
-2. Open `about:debugging`
-3. Click **This Firefox** → **Load Temporary Add-on**
-4. Select any file inside the `firefox-extension/` folder
+1. Download this repo (Code → Download ZIP) and unzip
+2. Go to `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on** → pick any file in the `firefox-extension` folder
+4. That's it — browse any site and click the extension icon
 
-Visit any site with forms — start typing and watch the badge.
+> Firefox temporary add-ons reset when you close the browser — just re-load next session.
 
 ## Project structure
 
