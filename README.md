@@ -8,48 +8,81 @@
 
 **You haven't clicked submit yet.** You're still typing your email into a login form. But a script already read the field, URL-encoded your half-typed address, and fired it to an analytics server in a cross-origin request. This happens on thousands of sites. A [USENIX 2022 study](https://www.usenix.org/conference/usenixsecurity22/presentation/senol) found 2,950 of the top 100,000 websites leak form data before submission — email, passwords, search queries, credit card fields — exfiltrated to third parties while you're still typing.
 
-wearesilent makes this visible. It uses ARIA accessibility labels to identify form fields by their human-readable names, listens for input events (compatible with React, Vue, Angular, and vanilla JS), intercepts cross-origin network requests, and correlates your typed values with outgoing data in real-time. When a match is found, you see exactly what was sent, and to whom — displayed as clean, readable labels like "Your Email" or "Your Phone Number" instead of cryptic field IDs.
-
-No cloud. No AI. No data leaves your browser. Everything runs locally in your browser as a lightweight extension.
+wearesilent makes this visible. No cloud. No AI. No data leaves your browser. Everything runs locally as a lightweight extension.
 
 Part of the **weare____** privacy tool series.
 
 ## What it looks like
 
-When a leak is detected, the extension badge lights up red with a count. Click it to see:
+The popup has two independent sections:
 
-- **Which fields** were sent (using ARIA labels: "Email", "First Name", "Phone", not `input_3`)
-- **What value** was captured (truncated for privacy)
-- **Which company** received it (resolved from domain: `google-analytics.com` → "Google Analytics")
+**Sent without your permission** (red) — confirmed leaks where your typed values were found inside cross-origin network requests:
 
-Example from Nike.com checkout:
 ```
-Your First Name    → TikTok
-Your Email         → Loqate
-Your Address       → Loqate
+nike.com
+         1
+field sent before you submit
+
+SENT WITHOUT YOUR PERMISSION                    1
+┌──────────────────────────────────────────────┐
+│ Your Start typing address                    │
+│ "hwrhh"                                      │
+│ → [Loqate]                                   │
+└──────────────────────────────────────────────┘
+
+ACTIVE TRACKERS ON THIS PAGE                    3
+[Forter]  [Loqate]  [New Relic]
+Active while you enter data
 ```
+
+**Active trackers on this page** (amber) — known third-party tracker companies detected making requests while form fields are present on the page.
+
+Badge priority:
+- Has confirmed leaks → red badge with count (e.g., "2")
+- Trackers + form fields but no confirmed leaks → amber "!" badge
+- Nothing → no badge
 
 ## How it works
 
-1. **Injects a page-level script** (`document_start`, MAIN world, before any site code runs)
-2. **Listens to `input` and `change` events** — captures form values as you type. Works with all frameworks (React, Vue, Angular, vanilla) because they all fire real DOM events
-3. **Resolves field identity via ARIA** — walks the accessibility tree: `aria-labelledby` → `aria-label` → `<label for>` → wrapping `<label>` → `placeholder` → cleaned `name`/`id`
-4. **Intercepts cross-origin requests** — wraps `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, and `HTMLImageElement.src`
-5. **Correlates**: when a cross-origin request fires, checks if the URL or body contains any recently-typed value (raw + URL-encoded matching)
-6. **Reports**: matched leaks surface as a red badge count and a popup showing which fields were sent to which companies, grouped by field label
+wearesilent uses a dual detection approach:
 
-All processing is local. Same-origin requests are ignored — only cross-origin exfiltration is flagged.
+### Approach B — Confirmed leaks ("Sent without your permission")
+
+1. **Content script listens to `input` and `change` events** — captures form values as you type. Works with all frameworks (React, Vue, Angular, vanilla) because they all fire real DOM events
+2. **Resolves field identity via ARIA** — walks the accessibility tree: `aria-labelledby` → `aria-label` → `<label for>` → wrapping `<label>` → `placeholder` → cleaned `name`/`id`
+3. **Background uses `webRequest.onBeforeRequest`** to intercept all network requests, extracting URL + request body as a haystack
+4. **Bidirectional correlation**: forward matching (request fires → check against known values) + retroactive matching (new value arrives → check against buffered recent requests)
+5. **Match found → leak stored** in `storage.session`, badge turns red with count
+
+### Approach A — Tracker awareness ("Active trackers on this page")
+
+1. **Background collects all third-party domains** from `webRequest` into per-tab tracker sets
+2. **Content script scans the DOM** for visible form fields (`input`, `textarea`, `select`), reports their ARIA labels to background
+3. **Popup resolves hostnames** to known company names using the `KNOWN_COMPANIES` map and filters out unknown/raw hostnames
+4. When trackers + form fields are both present but no confirmed leaks yet → amber "!" badge
+
+All processing is local. Same-origin requests are filtered out — only cross-origin exfiltration is flagged.
+
+## Known companies
+
+The popup resolves raw hostnames to recognizable names. Currently tracked:
+
+Google Analytics, Google Ads, Google Tag Manager, Meta, Microsoft Clarity, Hotjar, FullStory, Mouseflow, LogRocket, Crazy Egg, Klaviyo, HubSpot, Mailchimp, Braze, The Trade Desk, Criteo, Taboola, Outbrain, Mixpanel, Amplitude, Segment, Heap, Shopify Analytics, TikTok, ByteDance, Snapchat, Pinterest, LinkedIn, X (Twitter), RudderStack, mParticle, Salesforce, Loqate, Sierra AI, New Relic, DataDome, Forter
+
+Unknown hostnames are silently filtered from the popup — users only see recognized company names.
 
 ## What it catches
 
 | Vector | Example |
 |---|---|
 | Address autocomplete services | Loqate/Addressy reading keystrokes in address fields |
+| Fraud detection | Forter collecting field data for risk scoring |
 | Session replay tools | FullStory, Hotjar, Mouseflow reading input fields and sending to their servers |
 | Marketing pixels | Meta Pixel, TikTok Pixel capturing email/name fields on form interaction |
 | CRM/chat widgets | Sierra AI, Salesforce reading email fields for identity resolution |
 | Analytics scripts | Google Analytics, Amplitude exfiltrating search queries, login attempts |
 | Abandoned cart tracking | Klaviyo, Shopify capturing partially-typed email for retargeting |
+| APM/monitoring | New Relic collecting page interaction data including form fields |
 | Beacon/pixel exfiltration | `sendBeacon` or 1x1 image requests with form values embedded in URLs |
 
 ## Tested on
@@ -80,52 +113,92 @@ Visit any site with forms — start typing and watch the badge.
 ## Project structure
 
 ```
-chrome-extension/          # Chrome MV3
-firefox-extension/         # Firefox MV3
-  manifest.json            # MV3 manifest (Chrome: service_worker, Firefox: scripts)
-  injected.js              # MAIN world: input event tracking + ARIA label resolution + network interception
-  content.js               # ISOLATED world: bridges leak events to background, keepalive port for SW
-  background.js            # Per-tab leak storage (storage.session), same-site filter, badge, cleanup
-  popup.html/js/css        # Dark-themed popup: field labels, values, company names
-test-page/                 # Local test page simulating 6 tracker types
+chrome-extension/
+  manifest.json        MV3 manifest (service_worker background)
+  background.js        webRequest listener, value correlation, tracker tracking, storage.session
+  content.js           ISOLATED world: input/change listeners, ARIA labels, field scanning
+  popup.html/js/css    Dark-themed popup: two-section layout, company resolution, tracker chips
+
+firefox-extension/
+  manifest.json        MV3 manifest (background scripts, gecko settings, min Firefox 115)
+  background.js        Same as Chrome but storage.session for ALL popup data (survives suspension)
+  content.js           Same as Chrome but browser.* APIs + injected.js script injection
+  injected.js          MAIN world: wraps fetch/XHR/sendBeacon to capture request bodies
+  popup.html/js/css    Identical to Chrome but browser.* Promise-style APIs
+
+test-page/             Local test page simulating 6 tracker types
 ```
 
 ## Architecture
 
 ```
-User types into <input>          ARIA label resolved           Cross-origin request fires
+                        APPROACH B (Confirmed Leaks)
+
+User types into <input>          ARIA label resolved           webRequest fires
        │                              │                              │
        ▼                              ▼                              ▼
-  input/change event           getAriaLabel() walks:          Wrapped fetch/XHR/beacon/img
-  fires on document            aria-labelledby →              checks URL + body against
-       │                       aria-label →                   tracked values
-       ▼                       <label for> →                         │
-  trackField() stores          wrapping <label> →                    ▼
-  { value, label, ts }         placeholder →                  Match found? → LEAK
-  in trackedValues map         name/id fallback               postMessage to content.js
+  input/change event           getAriaLabel() walks:          onBeforeRequest extracts
+  fires on document            aria-labelledby →              URL + requestBody as haystack
+       │                       aria-label →                          │
+       ▼                       <label for> →                         ▼
+  content.js sends             wrapping <label> →             Bidirectional matching:
+  { value, label }             placeholder →                  Forward: request → check values
+  to background.js             name/id fallback               Retroactive: value → check buffered
                                                                      │
                                                                      ▼
-                                                              content.js → background.js
-                                                              storage.session + badge + popup
+                                                              Match? → storeLeak()
+                                                              storage.session + red badge
+
+
+                        APPROACH A (Tracker Awareness)
+
+  webRequest collects                content.js scans              Popup resolves
+  all third-party domains            form fields on page           hostnames → company names
+       │                                   │                              │
+       ▼                                   ▼                              ▼
+  tabTrackers[tabId]               reportFields { labels }       KNOWN_COMPANIES map
+  per-tab hostname set             sent to background.js          filter unknown → show chips
+       │                                   │                              │
+       └───────────┬───────────────────────┘                              │
+                   ▼                                                      │
+       Both present + no leaks?                                           │
+       → amber "!" badge                                                  │
 ```
+
+## Chrome vs Firefox differences
+
+| Aspect | Chrome | Firefox |
+|---|---|---|
+| Background | Service worker (stays alive via webRequest) | Event page (suspends after idle) |
+| Request body access | `webRequest.onBeforeRequest` provides `requestBody` natively | `requestBody` unreliable for sendBeacon/some fetch — supplemented by `injected.js` |
+| Data persistence | `tabTrackers`/`tabFields` in-memory, leaks in `storage.session` | ALL popup data in `storage.session` (survives background suspension) |
+| Body capture | Not needed | `injected.js` wraps `fetch`/`XHR`/`sendBeacon` in page context, dispatches `CustomEvent` |
+| APIs | `chrome.*` callback-style | `browser.*` Promise-style |
+| Manifest | `"service_worker": "background.js"` | `"scripts": ["background.js"]` + `web_accessible_resources` + gecko ID |
+| Tracker blocking | None | Firefox ETP may block some trackers → different results (expected) |
 
 ## Key design decisions
 
 | Decision | Why |
 |---|---|
+| `webRequest` API instead of prototype wrapping | Wrapping `fetch`/`XHR` in MAIN world breaks pages (Promise return values can't cross Xray boundary in Firefox). `webRequest` is reliable and non-invasive. |
 | `input` events instead of `.value` getter wrapping | React, Vue, Angular maintain internal state and don't always trigger prototype getters. DOM `input` events fire reliably across all frameworks. |
-| ARIA labels instead of `el.name \|\| el.id` | Real sites have auto-generated IDs (`input_3`, `field-abc123`) or missing names. ARIA labels give human-readable names ("Email Address", "Phone Number") because sites need them for accessibility. |
-| Same-site filter in background.js | Keeps badge count and popup in sync. Requests to the site's own domain aren't leaks. |
-| Keepalive port (Chrome) | MV3 service workers die after ~30s of inactivity. A long-lived port from content.js prevents silent message failures. |
-| No filtering in injected.js | Prototype wrapping in MAIN world is fragile. All filtering happens in background.js (storage) and popup.js (display). |
-| Company name resolution | Raw hostnames like `otlp-http-production.shopifysvc.com` mean nothing to users. Mapping to "Shopify Analytics" makes leaks understandable. |
+| ARIA labels instead of `el.name \|\| el.id` | Real sites have auto-generated IDs (`input_3`, `field-abc123`). ARIA labels give human-readable names ("Email Address", "Phone Number") because sites need them for accessibility. |
+| Bidirectional matching | Forward matching misses values typed before the request. Retroactive matching (buffered requests checked when new values arrive) catches these cases. |
+| Known companies only in popup | Raw hostnames like `otlp-http-production.shopifysvc.com` mean nothing to users. Mapping to "Shopify Analytics" makes leaks understandable. Unknown hostnames are filtered out. |
+| Two independent sections | Confirmed leaks (red) and tracker awareness (amber) serve different purposes. Showing both gives users the full picture without conflating detection with confirmation. |
+| Same-site filter in background.js | Requests to the site's own domain aren't leaks. Filtering in background keeps badge and popup accurate. |
+| `storage.session` for leak data | Survives service worker suspension (Chrome) and background page suspension (Firefox). Automatically cleared when browser closes. |
+| Firefox `injected.js` supplement | Firefox `webRequest` doesn't reliably provide `requestBody.raw` for `sendBeacon`/some `fetch`. Injected script captures bodies in page context and relays via `CustomEvent`. |
 
 ## Permissions
 
 | Permission | Why |
 |---|---|
-| `storage` | `storage.session` stores per-tab leak data for badge and popup display |
-| `host_permissions: <all_urls>` | Content scripts must inject into every page at `document_start` to intercept network APIs before site scripts run |
+| `storage` | `storage.session` stores per-tab leak data, tracker lists, and field labels for badge and popup |
+| `webRequest` | Intercepts all network requests to extract URLs and request bodies for value correlation and tracker tracking |
+| `host_permissions: <all_urls>` | Content scripts must inject into every page; webRequest must monitor all origins |
+| `web_accessible_resources` (Firefox only) | `injected.js` must be loadable from page context to capture request bodies |
 
 ## Research
 
